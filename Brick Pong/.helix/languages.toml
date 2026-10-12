@@ -1,0 +1,5 @@
+[language-server.ols]
+command = "C:/bin/ols.exe"
+
+[language-server.ols.config]
+odin_command = "C:/bin/odin.exe"
