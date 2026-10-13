@@ -1,6 +1,7 @@
 package main
 
 import "core:fmt"
+import "core:math"
 import "core:math/rand"
 import raylib "vendor:raylib"
 
@@ -12,14 +13,18 @@ menu_font: i32 = 30
 menu_spacing: i32 = 45
 // gameplay related
 Ball :: struct {
-	position: raylib.Vector2,
-	velocity: raylib.Vector2,
-	radius:   f32,
+	position:       raylib.Vector2,
+	velocity:       raylib.Vector2,
+	radius:         f32,
+	active:         bool,
+	remaining_time: f32,
+	temporary:      bool,
 }
 
 ballStartX :: 400
 ballStartY :: 300
 ballRadius :: 10
+ballRadius_PowerUp :: 5
 
 Brick :: struct {
 	bounds: raylib.Rectangle,
@@ -91,14 +96,6 @@ main :: proc() {
 	defer delete(powerUps)
 	raylib.SetTargetFPS(60)
 
-	start_ball := Ball {
-		position = {ballStartX, ballStartY},
-		velocity = {200, -250},
-		radius   = ballRadius,
-	}
-	append(&balls, start_ball)
-
-
 	paddle = Paddle {
 		raylib.Rectangle {
 			(f32(raylib.GetScreenWidth()) - paddle_width) / 2,
@@ -135,6 +132,17 @@ menu :: proc(menu_array: []cstring) {
 			lives = 3
 			points = 0
 			init_bricks()
+			clear(&powerUps)
+			clear(&balls)
+			start_ball := Ball {
+				position       = {ballStartX, ballStartY},
+				velocity       = {200, -250},
+				radius         = ballRadius,
+				active         = true,
+				remaining_time = 0,
+				temporary      = false,
+			}
+			append(&balls, start_ball)
 		} else if (menu_array[selected_option] == "Exit") {
 			raylib.CloseWindow()
 		}
@@ -166,10 +174,12 @@ gameplay :: proc(paddle: ^Paddle) {
 		game_state = GameState.GAME_OVER
 	}
 
-
-	for &ball in balls {
+	for &ball, index in balls {
 		update_ball(&ball, raylib.GetFrameTime())
-		collides_with_wall(&ball)
+		if (!ball.active) {
+			continue
+		}
+		collides_with_wall(&ball, index)
 		check_paddle_collision(&ball, paddle)
 		for &brick in bricks {
 			check_brick_collision(&ball, &brick)
@@ -211,15 +221,28 @@ gameplay :: proc(paddle: ^Paddle) {
 	draw_paddle(paddle^)
 	draw_power_ups()
 	raylib.EndDrawing()
+	cleanup_balls()
 }
 
 update_ball :: proc(ball: ^Ball, dt: f32) {
+
+	if (ball_count() == 1) {
+		ball.temporary = false
+		ball.radius = ballRadius
+	}
 	ball.position.x += ball.velocity.x * dt
 	ball.position.y += ball.velocity.y * dt
+	ball.remaining_time -= dt
+	if (ball.remaining_time <= 0 && ball.temporary) {
+		ball.active = false
+	}
 }
 
 draw_balls :: proc() {
 	for ball in balls {
+		if (!ball.active) {
+			continue
+		}
 		raylib.DrawCircleV(ball.position, ball.radius, raylib.WHITE)
 	}
 }
@@ -244,7 +267,7 @@ draw_power_ups :: proc() {
 	}
 }
 
-collides_with_wall :: proc(ball: ^Ball) {
+collides_with_wall :: proc(ball: ^Ball, index: int) {
 	width := f32(raylib.GetScreenWidth())
 	height := f32(raylib.GetScreenHeight())
 	r := ball.radius
@@ -260,6 +283,13 @@ collides_with_wall :: proc(ball: ^Ball) {
 	}
 
 	if (ball.position.y + r >= height) {
+		ballCount := ball_count()
+		if (ballCount > 1) {
+			ball.active = false
+			ball.temporary = true
+			return
+		}
+
 		lives -= 1
 		ball.position.x = ballStartX
 		ball.position.y = ballStartY
@@ -386,13 +416,14 @@ powerUp_tick_cooldown :: proc() {
 			continue
 		}
 
-		powerUp.active = false
-
 		if (powerUp.preset.ability == .SPLIT) {
-
+			if (ball_count() == 1) {
+				balls[get_ball()].radius = ballRadius
+			}
 		} else if (powerUp.preset.ability == .ENLARGE) {
 			paddle.bounds.width -= powerUp_enlarge_width
 		}
+		powerUp.active = false
 	}
 }
 
@@ -410,9 +441,75 @@ check_power_up_paddle_colision :: proc(paddle: ^Paddle) {
 		powerUp.bounds.y = 0
 
 		if (powerUp.preset.ability == PowerUpAbility.SPLIT) {
+			newBalls: [dynamic]Ball
+			for &ball, index in balls {
+				if (!ball.active) {
+					continue
+				}
+				ball.radius = ballRadius_PowerUp
+				for i := 0; i < 2; i += 1 {
+					// angle calculation
+					angle: f32 = 20 * math.PI / 180 // 20 degrees in radians
+					if i == 1 {
+						angle = -angle
+					}
 
+					vx := ball.velocity.x
+					vy := ball.velocity.y
+
+					newBall := Ball {
+						position       = {ball.position.x, ball.position.y},
+						velocity       = {
+							vx * math.cos(angle) - vy * math.sin(angle),
+							vx * math.sin(angle) + vy * math.cos(angle),
+						},
+						radius         = ballRadius_PowerUp,
+						active         = true,
+						remaining_time = powerUp.remaining_time,
+						temporary      = true,
+					}
+
+					append(&newBalls, newBall)
+				}
+			}
+
+			for ball in newBalls {
+				append(&balls, ball)
+			}
 		} else if (powerUp.preset.ability == PowerUpAbility.ENLARGE) {
 			paddle.bounds.width += powerUp_enlarge_width
 		}
+	}
+}
+
+ball_count :: proc() -> int {
+	counter := 0
+	for ball in balls {
+		counter += ball.active ? 1 : 0
+	}
+
+	return counter
+}
+
+get_ball :: proc() -> int {
+	for ball, index in balls {
+		if (ball.active && !ball.temporary) {
+			return index
+		}
+	}
+
+	return 0
+}
+
+cleanup_balls :: proc() {
+	shouldAdvance: bool = true
+	for i := 0; i < len(balls); i += shouldAdvance ? 1 : 0 {
+		shouldAdvance = true
+		if (balls[i].active) {
+			continue
+		}
+
+		ordered_remove(&balls, i)
+		shouldAdvance = false
 	}
 }
