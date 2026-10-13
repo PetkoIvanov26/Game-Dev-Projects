@@ -13,18 +13,26 @@ menu_font: i32 = 30
 menu_spacing: i32 = 45
 // gameplay related
 Ball :: struct {
-	position:       raylib.Vector2,
-	velocity:       raylib.Vector2,
-	radius:         f32,
-	active:         bool,
-	remaining_time: f32,
-	temporary:      bool,
+	position:               raylib.Vector2,
+	velocity:               raylib.Vector2,
+	radius:                 f32,
+	active:                 bool,
+	remaining_time:         f32,
+	temporary:              bool,
+	color:                  raylib.Color,
+	on_fire:                bool,
+	on_fire_remaining_time: f32,
 }
 
 ballStartX :: 400
 ballStartY :: 300
+ballVX :: 200
+ballVY :: -270
+ballSpeedMultiplier: f32 = 1
 ballRadius :: 10
 ballRadius_PowerUp :: 5
+ballColor :: raylib.WHITE
+ballColor_Fireball :: raylib.ORANGE
 
 Brick :: struct {
 	bounds: raylib.Rectangle,
@@ -47,6 +55,8 @@ paddle_height :: 10
 paddle_velocity :: 300
 paddle: Paddle
 
+
+// power up related
 PowerUp :: struct {
 	bounds:         raylib.Rectangle,
 	preset:         PowerUpPreset,
@@ -58,6 +68,13 @@ PowerUp :: struct {
 PowerUpAbility :: enum {
 	SPLIT,
 	ENLARGE,
+	SLOW_BALL,
+	FIREBALL,
+	DOUBLE_POINTS,
+	EXTRA_LIFE,
+	FLOOR_SHIELD,
+	NARROW_PADDLE,
+	FAST_BALL,
 }
 
 PowerUpPreset :: struct {
@@ -66,14 +83,22 @@ PowerUpPreset :: struct {
 	duration: f32,
 }
 
-presetList := [2]PowerUpPreset {
+presetList := [9]PowerUpPreset {
 	{ability = .SPLIT, color = raylib.BLUE, duration = 5},
 	{ability = .ENLARGE, color = raylib.GREEN, duration = 10},
+	{ability = .SLOW_BALL, color = raylib.MAGENTA, duration = 5},
+	{ability = .FAST_BALL, color = raylib.BROWN, duration = 6},
+	{ability = .FIREBALL, color = raylib.RED, duration = 5},
+	{ability = .DOUBLE_POINTS, color = raylib.PURPLE, duration = 10},
+	{ability = .FLOOR_SHIELD, color = raylib.BEIGE, duration = 0},
+	{ability = .NARROW_PADDLE, color = raylib.YELLOW, duration = 5},
+	{ability = .EXTRA_LIFE, color = raylib.WHITE, duration = 0},
 }
 powerUp_width :: 30
 powerUp_height :: 30
-powerUp_drop_speed :: 120
+powerUp_drop_speed :: 150
 powerUp_enlarge_width :: 30
+powerUp_narrow_width :: 40
 
 // game state related
 GameState :: enum {
@@ -84,6 +109,9 @@ GameState :: enum {
 game_state: GameState = GameState.MENU
 lives := 3
 points := 0
+shield_amount := 0
+
+pointsMultiplier := 1
 
 balls: [dynamic]Ball
 powerUps: [dynamic]PowerUp
@@ -135,12 +163,15 @@ menu :: proc(menu_array: []cstring) {
 			clear(&powerUps)
 			clear(&balls)
 			start_ball := Ball {
-				position       = {ballStartX, ballStartY},
-				velocity       = {200, -250},
-				radius         = ballRadius,
-				active         = true,
-				remaining_time = 0,
-				temporary      = false,
+				position               = {ballStartX, ballStartY},
+				velocity               = {ballVX, ballVY},
+				radius                 = ballRadius,
+				active                 = true,
+				remaining_time         = 0,
+				temporary              = false,
+				color                  = ballColor,
+				on_fire                = false,
+				on_fire_remaining_time = 0,
 			}
 			append(&balls, start_ball)
 		} else if (menu_array[selected_option] == "Exit") {
@@ -230,11 +261,17 @@ update_ball :: proc(ball: ^Ball, dt: f32) {
 		ball.temporary = false
 		ball.radius = ballRadius
 	}
-	ball.position.x += ball.velocity.x * dt
-	ball.position.y += ball.velocity.y * dt
+	ball.position.x += (ball.velocity.x * ballSpeedMultiplier) * dt
+	ball.position.y += (ball.velocity.y * ballSpeedMultiplier) * dt
+	if (ball.on_fire_remaining_time > 0) {
+		ball.on_fire_remaining_time -= dt
+	}
 	ball.remaining_time -= dt
 	if (ball.remaining_time <= 0 && ball.temporary) {
 		ball.active = false
+	}
+	if (ball.on_fire_remaining_time <= 0) {
+		reset_fireball(ball)
 	}
 }
 
@@ -243,7 +280,7 @@ draw_balls :: proc() {
 		if (!ball.active) {
 			continue
 		}
-		raylib.DrawCircleV(ball.position, ball.radius, raylib.WHITE)
+		raylib.DrawCircleV(ball.position, ball.radius, ball.color)
 	}
 }
 
@@ -290,7 +327,14 @@ collides_with_wall :: proc(ball: ^Ball, index: int) {
 			return
 		}
 
-		lives -= 1
+		if (shield_amount > 0) {
+			shield_amount -= 1
+		} else {
+			lives -= 1
+		}
+		if (ball.on_fire) {
+			reset_fireball(ball)
+		}
 		ball.position.x = ballStartX
 		ball.position.y = ballStartY
 	}
@@ -311,12 +355,12 @@ check_brick_collision :: proc(ball: ^Ball, brick: ^Brick) {
 	}
 
 	brick.active = false
-	points += 100
+	points += 100 * pointsMultiplier
 	normal := ball_collision_normal(ball^, brick.bounds)
 
 	roll := rand.int_range(1, 11)
 	roll_preset := rand.int_range(0, len(presetList))
-	if (roll > 0) {
+	if (roll > 7) {
 		powerUp := PowerUp {
 			raylib.Rectangle{brick.bounds.x, brick.bounds.y, powerUp_width, powerUp_height},
 			presetList[roll_preset],
@@ -326,6 +370,10 @@ check_brick_collision :: proc(ball: ^Ball, brick: ^Brick) {
 		}
 
 		append(&powerUps, powerUp)
+	}
+
+	if (ball.on_fire) {
+		return
 	}
 
 	if (normal.y > 0) {
@@ -411,17 +459,24 @@ powerUp_tick_cooldown :: proc() {
 		}
 
 		powerUp.remaining_time -= raylib.GetFrameTime()
-		fmt.printf("power up active")
 		if (powerUp.remaining_time > 0) {
 			continue
 		}
 
-		if (powerUp.preset.ability == .SPLIT) {
+		ability := powerUp.preset.ability
+
+		if (ability == .SPLIT) {
 			if (ball_count() == 1) {
 				balls[get_ball()].radius = ballRadius
 			}
 		} else if (powerUp.preset.ability == .ENLARGE) {
 			paddle.bounds.width -= powerUp_enlarge_width
+		} else if (ability == .SLOW_BALL || ability == .FAST_BALL) {
+			ballSpeedMultiplier = 1
+		} else if (ability == .DOUBLE_POINTS) {
+			pointsMultiplier = 1
+		} else if (ability == .NARROW_PADDLE) {
+			paddle.bounds.width += powerUp_narrow_width
 		}
 		powerUp.active = false
 	}
@@ -440,44 +495,30 @@ check_power_up_paddle_colision :: proc(paddle: ^Paddle) {
 		powerUp.bounds.x = 0
 		powerUp.bounds.y = 0
 
-		if (powerUp.preset.ability == PowerUpAbility.SPLIT) {
-			newBalls: [dynamic]Ball
-			for &ball, index in balls {
-				if (!ball.active) {
-					continue
-				}
-				ball.radius = ballRadius_PowerUp
-				for i := 0; i < 2; i += 1 {
-					// angle calculation
-					angle: f32 = 20 * math.PI / 180 // 20 degrees in radians
-					if i == 1 {
-						angle = -angle
-					}
+		ability := powerUp.preset.ability
 
-					vx := ball.velocity.x
-					vy := ball.velocity.y
-
-					newBall := Ball {
-						position       = {ball.position.x, ball.position.y},
-						velocity       = {
-							vx * math.cos(angle) - vy * math.sin(angle),
-							vx * math.sin(angle) + vy * math.cos(angle),
-						},
-						radius         = ballRadius_PowerUp,
-						active         = true,
-						remaining_time = powerUp.remaining_time,
-						temporary      = true,
-					}
-
-					append(&newBalls, newBall)
-				}
-			}
-
-			for ball in newBalls {
-				append(&balls, ball)
-			}
-		} else if (powerUp.preset.ability == PowerUpAbility.ENLARGE) {
+		if (ability == .SPLIT) {
+			apply_ability_SPLIT(powerUp.remaining_time)
+		} else if (ability == .ENLARGE) {
 			paddle.bounds.width += powerUp_enlarge_width
+		} else if (ability == .SLOW_BALL) {
+			ballSpeedMultiplier = 0.75
+		} else if (ability == .FAST_BALL) {
+			ballSpeedMultiplier = 1.50
+		} else if (ability == .EXTRA_LIFE) {
+			lives += 1
+		} else if (ability == .DOUBLE_POINTS) {
+			pointsMultiplier *= 2
+		} else if (ability == .FLOOR_SHIELD) {
+			shield_amount += 1
+		} else if (ability == .NARROW_PADDLE) {
+			paddle.bounds.width -= powerUp_narrow_width
+		} else if (ability == .FIREBALL) {
+			for &ball in balls {
+				ball.on_fire = true
+				ball.color = ballColor_Fireball
+				ball.on_fire_remaining_time += powerUp.preset.duration
+			}
 		}
 	}
 }
@@ -512,4 +553,51 @@ cleanup_balls :: proc() {
 		ordered_remove(&balls, i)
 		shouldAdvance = false
 	}
+}
+
+apply_ability_SPLIT :: proc(remaining_time: f32) {
+	newBalls: [dynamic]Ball
+	for &ball, index in balls {
+		if (!ball.active) {
+			continue
+		}
+		ball.radius = ballRadius_PowerUp
+		for i := 0; i < 2; i += 1 {
+			// angle calculation
+			angle: f32 = 20 * math.PI / 180 // 20 degrees in radians
+			if i == 1 {
+				angle = -angle
+			}
+
+			vx := ball.velocity.x
+			vy := ball.velocity.y
+
+			newBall := Ball {
+				position               = {ball.position.x, ball.position.y},
+				velocity               = {
+					vx * math.cos(angle) - vy * math.sin(angle),
+					vx * math.sin(angle) + vy * math.cos(angle),
+				},
+				radius                 = ballRadius_PowerUp,
+				active                 = true,
+				remaining_time         = remaining_time,
+				temporary              = true,
+				color                  = ballColor,
+				on_fire                = false,
+				on_fire_remaining_time = 0,
+			}
+
+			append(&newBalls, newBall)
+		}
+	}
+
+	for ball in newBalls {
+		append(&balls, ball)
+	}
+}
+
+reset_fireball :: proc(ball: ^Ball) {
+	ball.on_fire = false
+	ball.on_fire_remaining_time = 0
+	ball.color = ballColor
 }
