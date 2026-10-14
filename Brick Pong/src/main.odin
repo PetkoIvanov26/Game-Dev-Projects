@@ -117,9 +117,34 @@ balls: [dynamic]Ball
 powerUps: [dynamic]PowerUp
 bricks: [50]Brick
 
+// sounds
+ball_bounce: raylib.Sound
+brick_destroyed: raylib.Sound
+power_up_pickup: raylib.Sound
+game_loop_music: raylib.Music
+ui_option_sound: raylib.Sound
+button_select: raylib.Sound
+
 main :: proc() {
 	raylib.InitWindow(800, 600, "Brick Breakout")
 	defer raylib.CloseWindow()
+	raylib.InitAudioDevice()
+	ball_bounce = raylib.LoadSound("src/sfx/ball_bounce.mp3")
+	defer raylib.UnloadSound(ball_bounce)
+	brick_destroyed = raylib.LoadSound("src/sfx/brick-destroyed.mp3")
+	defer raylib.UnloadSound(brick_destroyed)
+	power_up_pickup = raylib.LoadSound("src/sfx/power-up-pickup.mp3")
+	defer raylib.UnloadSound(power_up_pickup)
+	game_loop_music = raylib.LoadMusicStream("src/sfx/game-loop-music.mp3")
+	game_loop_music.looping = true
+	raylib.SetMusicVolume(game_loop_music, 0.3)
+	raylib.PlayMusicStream(game_loop_music)
+	defer raylib.UnloadMusicStream(game_loop_music)
+	ui_option_sound = raylib.LoadSound("src/sfx/ui-hover-sfx.mp3")
+	defer raylib.UnloadSound(ui_option_sound)
+	button_select = raylib.LoadSound("src/sfx/button_select.mp3")
+	defer raylib.UnloadSound(button_select)
+	defer raylib.CloseAudioDevice()
 	defer delete(balls)
 	defer delete(powerUps)
 	raylib.SetTargetFPS(60)
@@ -140,6 +165,7 @@ main :: proc() {
 		if (game_state == GameState.MENU) {
 			menu(menu_options[:])
 		} else if (game_state == GameState.PLAYING) {
+			raylib.UpdateMusicStream(game_loop_music)
 			gameplay(&paddle)
 		} else if (game_state == GameState.GAME_OVER) {
 			menu(game_over_menu[:])
@@ -150,8 +176,10 @@ main :: proc() {
 menu :: proc(menu_array: []cstring) {
 	if (raylib.IsKeyReleased(.UP)) {
 		selected_option = (selected_option + len(menu_options) - 1) % len(menu_options)
+		raylib.PlaySound(ui_option_sound)
 	} else if (raylib.IsKeyReleased(.DOWN)) {
 		selected_option = (selected_option + 1) % len(menu_options)
+		raylib.PlaySound(ui_option_sound)
 	}
 
 	if (raylib.IsKeyPressed(.ENTER)) {
@@ -174,6 +202,7 @@ menu :: proc(menu_array: []cstring) {
 				on_fire_remaining_time = 0,
 			}
 			append(&balls, start_ball)
+			raylib.PlaySound(button_select)
 		} else if (menu_array[selected_option] == "Exit") {
 			raylib.CloseWindow()
 		}
@@ -253,6 +282,7 @@ gameplay :: proc(paddle: ^Paddle) {
 	draw_power_ups()
 	raylib.EndDrawing()
 	cleanup_balls()
+	cleanup_powerUps()
 }
 
 update_ball :: proc(ball: ^Ball, dt: f32) {
@@ -355,6 +385,7 @@ check_brick_collision :: proc(ball: ^Ball, brick: ^Brick) {
 	}
 
 	brick.active = false
+	raylib.PlaySound(brick_destroyed)
 	points += 100 * pointsMultiplier
 	normal := ball_collision_normal(ball^, brick.bounds)
 
@@ -387,6 +418,7 @@ check_brick_collision :: proc(ball: ^Ball, brick: ^Brick) {
 	} else if (normal.x < 0) {
 		ball.velocity.x = -abs(ball.velocity.x)
 	}
+	raylib.PlaySound(ball_bounce)
 }
 
 check_paddle_collision :: proc(ball: ^Ball, paddle: ^Paddle) {
@@ -407,7 +439,7 @@ check_paddle_collision :: proc(ball: ^Ball, paddle: ^Paddle) {
 	} else if (normal.x < 0) {
 		ball.velocity.x = -abs(ball.velocity.x)
 	}
-
+	raylib.PlaySound(ball_bounce)
 }
 
 ball_collision_normal :: proc(ball: Ball, rect: raylib.Rectangle) -> raylib.Vector2 {
@@ -489,6 +521,7 @@ check_power_up_paddle_colision :: proc(paddle: ^Paddle) {
 			continue
 		}
 
+		raylib.PlaySound(power_up_pickup)
 		powerUp.shouldRender = false
 		powerUp.active = true
 		powerUp.remaining_time = powerUp.preset.duration
@@ -555,6 +588,19 @@ cleanup_balls :: proc() {
 	}
 }
 
+cleanup_powerUps :: proc() {
+	shouldAdvance: bool = true
+	for i := 0; i < len(powerUps); i += 1 {
+		shouldAdvance = true
+		if (powerUps[i].active || powerUps[i].remaining_time > 0) {
+			continue
+		}
+
+		ordered_remove(&powerUps, i)
+		shouldAdvance = false
+	}
+}
+
 apply_ability_SPLIT :: proc(remaining_time: f32) {
 	newBalls: [dynamic]Ball
 	for &ball, index in balls {
@@ -582,9 +628,9 @@ apply_ability_SPLIT :: proc(remaining_time: f32) {
 				active                 = true,
 				remaining_time         = remaining_time,
 				temporary              = true,
-				color                  = ballColor,
-				on_fire                = false,
-				on_fire_remaining_time = 0,
+				color                  = ball.color,
+				on_fire                = ball.on_fire,
+				on_fire_remaining_time = ball.on_fire_remaining_time,
 			}
 
 			append(&newBalls, newBall)
@@ -594,6 +640,7 @@ apply_ability_SPLIT :: proc(remaining_time: f32) {
 	for ball in newBalls {
 		append(&balls, ball)
 	}
+	clear(&newBalls)
 }
 
 reset_fireball :: proc(ball: ^Ball) {
