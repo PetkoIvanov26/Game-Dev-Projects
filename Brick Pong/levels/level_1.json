@@ -1,0 +1,6 @@
+{
+  "name": "Introduction",
+  "layout": "layout_01.txt",
+  "starting_lives": 3,
+  "base_speed_multiplier": 1
+} 

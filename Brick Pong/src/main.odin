@@ -29,6 +29,7 @@ ballStartY :: 300
 ballVX :: 200
 ballVY :: -270
 ballSpeedMultiplier: f32 = 1
+ballSpeedModifier: f32 = 0.25
 ballRadius :: 10
 ballRadius_PowerUp :: 5
 ballColor :: raylib.WHITE
@@ -129,6 +130,7 @@ main :: proc() {
 	raylib.InitWindow(800, 600, "Brick Breakout")
 	defer raylib.CloseWindow()
 	raylib.InitAudioDevice()
+	defer raylib.CloseAudioDevice()
 	ball_bounce = raylib.LoadSound("src/sfx/ball_bounce.mp3")
 	defer raylib.UnloadSound(ball_bounce)
 	brick_destroyed = raylib.LoadSound("src/sfx/brick-destroyed.mp3")
@@ -144,22 +146,9 @@ main :: proc() {
 	defer raylib.UnloadSound(ui_option_sound)
 	button_select = raylib.LoadSound("src/sfx/button_select.mp3")
 	defer raylib.UnloadSound(button_select)
-	defer raylib.CloseAudioDevice()
 	defer delete(balls)
 	defer delete(powerUps)
 	raylib.SetTargetFPS(60)
-
-	paddle = Paddle {
-		raylib.Rectangle {
-			(f32(raylib.GetScreenWidth()) - paddle_width) / 2,
-			f32(raylib.GetScreenHeight()) - paddle_height - 10,
-			paddle_width,
-			paddle_height,
-		},
-		paddle_velocity,
-	}
-
-	init_bricks()
 
 	for !raylib.WindowShouldClose() {
 		if (game_state == GameState.MENU) {
@@ -175,33 +164,17 @@ main :: proc() {
 
 menu :: proc(menu_array: []cstring) {
 	if (raylib.IsKeyReleased(.UP)) {
-		selected_option = (selected_option + len(menu_options) - 1) % len(menu_options)
+		selected_option = (selected_option + len(menu_array) - 1) % len(menu_array)
 		raylib.PlaySound(ui_option_sound)
 	} else if (raylib.IsKeyReleased(.DOWN)) {
-		selected_option = (selected_option + 1) % len(menu_options)
+		selected_option = (selected_option + 1) % len(menu_array)
 		raylib.PlaySound(ui_option_sound)
 	}
 
 	if (raylib.IsKeyPressed(.ENTER)) {
 		if (menu_array[selected_option] == "Play" || menu_array[selected_option] == "Restart") {
 			game_state = GameState.PLAYING
-			lives = 3
-			points = 0
-			init_bricks()
-			clear(&powerUps)
-			clear(&balls)
-			start_ball := Ball {
-				position               = {ballStartX, ballStartY},
-				velocity               = {ballVX, ballVY},
-				radius                 = ballRadius,
-				active                 = true,
-				remaining_time         = 0,
-				temporary              = false,
-				color                  = ballColor,
-				on_fire                = false,
-				on_fire_remaining_time = 0,
-			}
-			append(&balls, start_ball)
+			setup_level()
 			raylib.PlaySound(button_select)
 		} else if (menu_array[selected_option] == "Exit") {
 			raylib.CloseWindow()
@@ -230,6 +203,7 @@ menu :: proc(menu_array: []cstring) {
 
 
 gameplay :: proc(paddle: ^Paddle) {
+	defer free_all(context.temp_allocator)
 	if (lives == 0) {
 		game_state = GameState.GAME_OVER
 	}
@@ -246,6 +220,7 @@ gameplay :: proc(paddle: ^Paddle) {
 		}
 	}
 	check_power_up_paddle_colision(paddle)
+	powerUp_collides_with_wall()
 	powerUp_update()
 	powerUp_tick_cooldown()
 	if (raylib.IsKeyDown(raylib.KeyboardKey.A)) {
@@ -344,7 +319,7 @@ collides_with_wall :: proc(ball: ^Ball, index: int) {
 		ball.velocity.x = -abs(ball.velocity.x)
 	}
 
-	if (ball.position.x <= 0) {
+	if (ball.position.x - r <= 0) {
 		ball.position.x = r
 		ball.velocity.x = abs(ball.velocity.x)
 	}
@@ -369,7 +344,7 @@ collides_with_wall :: proc(ball: ^Ball, index: int) {
 		ball.position.y = ballStartY
 	}
 
-	if (ball.position.y <= 0) {
+	if (ball.position.y - r <= 0) {
 		ball.position.y = r
 		ball.velocity.y = abs(ball.velocity.y)
 	}
@@ -429,28 +404,64 @@ check_paddle_collision :: proc(ball: ^Ball, paddle: ^Paddle) {
 	normal := ball_collision_normal(ball^, paddle.bounds)
 
 	if (normal.y > 0) {
+		ball.position.y = paddle.bounds.y + paddle.bounds.height + ball.radius
 		ball.velocity.y = abs(ball.velocity.y)
 	} else if (normal.y < 0) {
+		ball.position.y = paddle.bounds.y - ball.radius
 		ball.velocity.y = -abs(ball.velocity.y)
 	}
 
 	if (normal.x > 0) {
+		ball.position.x = paddle.bounds.x + paddle.bounds.width + ball.radius
 		ball.velocity.x = abs(ball.velocity.x)
 	} else if (normal.x < 0) {
+		ball.position.x = paddle.bounds.x - ball.radius
 		ball.velocity.x = -abs(ball.velocity.x)
 	}
 	raylib.PlaySound(ball_bounce)
 }
 
 ball_collision_normal :: proc(ball: Ball, rect: raylib.Rectangle) -> raylib.Vector2 {
-	normal :=
-		(ball.position -
-			{
-					clamp(ball.position.x, rect.x, rect.x + rect.width),
-					clamp(ball.position.y, rect.y, rect.y + rect.height),
-				})
+	closest := raylib.Vector2 {
+		clamp(ball.position.x, rect.x, rect.x + rect.width),
+		clamp(ball.position.y, rect.y, rect.y + rect.height),
+	}
+
+	normal := ball.position - closest
+
+	if (normal.x == 0 && normal.y == 0) {
+		distances := [4]f32 {
+			ball.position.x - rect.x, // Left
+			rect.x + rect.width - ball.position.x, //Right
+			ball.position.y - rect.y, // Top
+			rect.y + rect.height - ball.position.y, // Bottom
+		}
+
+		normals := [4]raylib.Vector2{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}
+
+		nearest := 0
+		for i := 1; i < len(distances); i += 1 {
+			if distances[i] < distances[nearest] {
+				nearest = i
+			}
+		}
+
+		normal = normals[nearest]
+	}
 
 	return normal
+}
+
+powerUp_collides_with_wall :: proc() {
+	width := f32(raylib.GetScreenWidth())
+	height := f32(raylib.GetScreenHeight())
+	for &powerUp in powerUps {
+		if (powerUp.bounds.y >= height) {
+			powerUp.shouldRender = false
+			powerUp.active = false
+			powerUp.remaining_time = 0
+		}
+	}
 }
 
 init_bricks :: proc() {
@@ -503,10 +514,12 @@ powerUp_tick_cooldown :: proc() {
 			}
 		} else if (powerUp.preset.ability == .ENLARGE) {
 			paddle.bounds.width -= powerUp_enlarge_width
-		} else if (ability == .SLOW_BALL || ability == .FAST_BALL) {
-			ballSpeedMultiplier = 1
+		} else if (ability == .SLOW_BALL) {
+			ballSpeedMultiplier += ballSpeedModifier
+		} else if (ability == .FAST_BALL) {
+			ballSpeedMultiplier -= ballSpeedModifier
 		} else if (ability == .DOUBLE_POINTS) {
-			pointsMultiplier = 1
+			pointsMultiplier /= 2
 		} else if (ability == .NARROW_PADDLE) {
 			paddle.bounds.width += powerUp_narrow_width
 		}
@@ -535,9 +548,17 @@ check_power_up_paddle_colision :: proc(paddle: ^Paddle) {
 		} else if (ability == .ENLARGE) {
 			paddle.bounds.width += powerUp_enlarge_width
 		} else if (ability == .SLOW_BALL) {
-			ballSpeedMultiplier = 0.75
+			if ballSpeedMultiplier <= 0.25 {
+				ballSpeedModifier = 0.25
+			} else {
+				ballSpeedMultiplier -= ballSpeedModifier
+			}
 		} else if (ability == .FAST_BALL) {
-			ballSpeedMultiplier = 1.50
+			if (ballSpeedMultiplier >= 2) {
+				ballSpeedMultiplier = 2
+			} else {
+				ballSpeedMultiplier += ballSpeedModifier
+			}
 		} else if (ability == .EXTRA_LIFE) {
 			lives += 1
 		} else if (ability == .DOUBLE_POINTS) {
@@ -590,9 +611,9 @@ cleanup_balls :: proc() {
 
 cleanup_powerUps :: proc() {
 	shouldAdvance: bool = true
-	for i := 0; i < len(powerUps); i += 1 {
+	for i := 0; i < len(powerUps); i += shouldAdvance ? 1 : 0 {
 		shouldAdvance = true
-		if (powerUps[i].active || powerUps[i].remaining_time > 0) {
+		if (powerUps[i].active || powerUps[i].remaining_time > 0 || powerUps[i].shouldRender) {
 			continue
 		}
 
@@ -603,6 +624,7 @@ cleanup_powerUps :: proc() {
 
 apply_ability_SPLIT :: proc(remaining_time: f32) {
 	newBalls: [dynamic]Ball
+	defer delete(newBalls)
 	for &ball, index in balls {
 		if (!ball.active) {
 			continue
@@ -640,11 +662,42 @@ apply_ability_SPLIT :: proc(remaining_time: f32) {
 	for ball in newBalls {
 		append(&balls, ball)
 	}
-	clear(&newBalls)
 }
 
 reset_fireball :: proc(ball: ^Ball) {
 	ball.on_fire = false
 	ball.on_fire_remaining_time = 0
 	ball.color = ballColor
+}
+setup_level :: proc() {
+	lives = 3
+	points = 0
+	shield_amount = 0
+	ballSpeedMultiplier = 1
+	pointsMultiplier = 1
+
+	init_bricks()
+	clear(&powerUps)
+	clear(&balls)
+	start_ball := Ball {
+		position               = {ballStartX, ballStartY},
+		velocity               = {ballVX, ballVY},
+		radius                 = ballRadius,
+		active                 = true,
+		remaining_time         = 0,
+		temporary              = false,
+		color                  = ballColor,
+		on_fire                = false,
+		on_fire_remaining_time = 0,
+	}
+	paddle = Paddle {
+		raylib.Rectangle {
+			(f32(raylib.GetScreenWidth()) - paddle_width) / 2,
+			f32(raylib.GetScreenHeight()) - paddle_height - 10,
+			paddle_width,
+			paddle_height,
+		},
+		paddle_velocity,
+	}
+	append(&balls, start_ball)
 }
