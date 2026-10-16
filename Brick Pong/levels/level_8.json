@@ -1,0 +1,6 @@
+{
+  "name": "Final Wall",
+  "layout": "levels/layouts/layout_08.txt",
+  "starting_lives": 2,
+  "base_speed_multiplier": 1.35
+}

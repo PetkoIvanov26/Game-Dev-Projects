@@ -24,12 +24,12 @@ menu :: proc(menu_array: []cstring) {
 			selected_option = 0
 			raylib.PlaySound(button_select)
 			game_state = .PLAYING
-			load_level(default_level_index)
+			load_level(default_level_index, true)
 		} else if (menu_array[selected_option] == "Restart") {
 			selected_option = 0
 			raylib.PlaySound(button_select)
 			game_state = .PLAYING
-			load_level(current_level_index)
+			load_level(current_level_index, true)
 		} else if (menu_array[selected_option] == "Exit") {
 			raylib.CloseWindow()
 		} else if (menu_array[selected_option] == "Levels") {
@@ -40,10 +40,9 @@ menu :: proc(menu_array: []cstring) {
 			game_state = .MENU
 		} else if (menu_array[selected_option] == "Continue") {
 			current_level_index = (current_level_index + 1) % level_count
-
 			game_state = .PLAYING
 			raylib.PlaySound(button_select)
-			load_level(current_level_index)
+			load_level(current_level_index, false)
 		}
 	}
 
@@ -87,7 +86,7 @@ level_menu :: proc(catalog: LevelCatalog) {
 			level, ok := read_level(entry.file)
 
 			if ok {
-				if (!load_level(selected_option)) {return}
+				if (!load_level(selected_option, true)) {return}
 				game_state = .PLAYING
 				delete(level.layout)
 			}

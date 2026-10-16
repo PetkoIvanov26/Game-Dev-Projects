@@ -1,0 +1,7 @@
+RR......RR
+.RR....RR.
+..RR..RR..
+...RRRR...
+..RR..RR..
+.RR....RR.
+RR......RR

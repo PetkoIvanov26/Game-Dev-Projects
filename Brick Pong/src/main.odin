@@ -1,6 +1,5 @@
 package main
 
-import "core:fmt"
 import raylib "vendor:raylib"
 
 // gameplay related

@@ -55,11 +55,13 @@ collides_with_wall :: proc(ball: ^Ball, index: int) {
 	if (ball.position.x + r >= width) {
 		ball.position.x = width - r
 		ball.velocity.x = -abs(ball.velocity.x)
+		raylib.PlaySound(ball_bounce)
 	}
 
 	if (ball.position.x - r <= 0) {
 		ball.position.x = r
 		ball.velocity.x = abs(ball.velocity.x)
+		raylib.PlaySound(ball_bounce)
 	}
 
 	if (ball.position.y + r >= height) {
@@ -85,6 +87,7 @@ collides_with_wall :: proc(ball: ^Ball, index: int) {
 	if (ball.position.y - r <= 0) {
 		ball.position.y = r
 		ball.velocity.y = abs(ball.velocity.y)
+		raylib.PlaySound(ball_bounce)
 	}
 }
 

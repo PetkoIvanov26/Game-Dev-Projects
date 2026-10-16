@@ -1,0 +1,6 @@
+{
+  "name": "Crossfire",
+  "layout": "levels/layouts/layout_07.txt",
+  "starting_lives": 2,
+  "base_speed_multiplier": 1.25
+}

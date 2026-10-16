@@ -1,7 +1,6 @@
 package main
 
 import "core:math"
-import "core:math/rand"
 import raylib "vendor:raylib"
 
 PowerUp :: struct {
@@ -30,16 +29,16 @@ PowerUpPreset :: struct {
 	duration: f32,
 }
 
-presetList := [1]PowerUpPreset {
+presetList := [9]PowerUpPreset {
 	{ability = .SPLIT, color = raylib.BLUE, duration = 5},
-	//	{ability = .ENLARGE, color = raylib.GREEN, duration = 10},
-	//	{ability = .SLOW_BALL, color = raylib.MAGENTA, duration = 5},
-	//	{ability = .FAST_BALL, color = raylib.BROWN, duration = 6},
-	//	{ability = .FIREBALL, color = raylib.RED, duration = 5},
-	//	{ability = .DOUBLE_POINTS, color = raylib.PURPLE, duration = 10},
-	//	{ability = .FLOOR_SHIELD, color = raylib.BEIGE, duration = 0},
-	//	{ability = .NARROW_PADDLE, color = raylib.YELLOW, duration = 5},
-	//	{ability = .EXTRA_LIFE, color = raylib.WHITE, duration = 0},
+	{ability = .ENLARGE, color = raylib.GREEN, duration = 10},
+	{ability = .SLOW_BALL, color = raylib.MAGENTA, duration = 5},
+	{ability = .FAST_BALL, color = raylib.BROWN, duration = 6},
+	{ability = .FIREBALL, color = raylib.RED, duration = 5},
+	{ability = .DOUBLE_POINTS, color = raylib.PURPLE, duration = 10},
+	{ability = .FLOOR_SHIELD, color = raylib.BEIGE, duration = 0},
+	{ability = .NARROW_PADDLE, color = raylib.YELLOW, duration = 5},
+	{ability = .EXTRA_LIFE, color = raylib.WHITE, duration = 0},
 }
 powerUp_width :: 30
 powerUp_height :: 30

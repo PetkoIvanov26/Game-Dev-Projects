@@ -7,6 +7,30 @@
     {
       "name": "One Chance",
       "file": "levels/level_2.json"
+    },
+    {
+      "name": "Twin Towers",
+      "file": "levels/level_3.json"
+    },
+    {
+      "name": "Diamond",
+      "file": "levels/level_4.json"
+    },
+    {
+      "name": "Zigzag",
+      "file": "levels/level_5.json"
+    },
+    {
+      "name": "The Vault",
+      "file": "levels/level_6.json"
+    },
+    {
+      "name": "Crossfire",
+      "file": "levels/level_7.json"
+    },
+    {
+      "name": "Final Wall",
+      "file": "levels/level_8.json"
     }
   ]
 }

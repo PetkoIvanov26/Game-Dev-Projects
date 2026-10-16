@@ -73,7 +73,7 @@ read_level :: proc(path: string) -> (Level, bool) {
 	return level, true
 }
 
-load_level :: proc(level_index: int) -> bool {
+load_level :: proc(level_index: int, reset_score: bool) -> bool {
 	level, ok := read_level(catalog.levels[level_index].file)
 	if !ok {
 		return false
@@ -87,7 +87,9 @@ load_level :: proc(level_index: int) -> bool {
 	defer delete(layout_data)
 
 	setup_level()
-
+	if (reset_score) {
+		points = 0
+	}
 	lives = level.starting_lives
 	ballSpeedMultiplier = level.base_speed_multiplier
 
@@ -129,7 +131,6 @@ init_bricks :: proc(layout: string) {
 }
 
 setup_level :: proc() {
-	points = 0
 	shield_amount = 0
 	pointsMultiplier = 1
 

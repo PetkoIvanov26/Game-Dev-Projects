@@ -1,0 +1,6 @@
+{
+  "name": "Diamond",
+  "layout": "levels/layouts/layout_04.txt",
+  "starting_lives": 3,
+  "base_speed_multiplier": 1.1
+}

@@ -1,0 +1,6 @@
+{
+  "name": "The Vault",
+  "layout": "levels/layouts/layout_06.txt",
+  "starting_lives": 3,
+  "base_speed_multiplier": 1.2
+}

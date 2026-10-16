@@ -1,0 +1,6 @@
+{
+  "name": "Twin Towers",
+  "layout": "levels/layouts/layout_03.txt",
+  "starting_lives": 3,
+  "base_speed_multiplier": 1.0
+}
