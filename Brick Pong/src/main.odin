@@ -1,40 +1,9 @@
 package main
 
 import "core:fmt"
-import "core:math"
-import "core:math/rand"
 import raylib "vendor:raylib"
 
-// menu related
-menu_options := [3]cstring{"Play", "Settings", "Exit"}
-game_over_menu := [2]cstring{"Restart", "Exit"}
-selected_option := 0
-menu_font: i32 = 30
-menu_spacing: i32 = 45
 // gameplay related
-Ball :: struct {
-	position:               raylib.Vector2,
-	velocity:               raylib.Vector2,
-	radius:                 f32,
-	active:                 bool,
-	remaining_time:         f32,
-	temporary:              bool,
-	color:                  raylib.Color,
-	on_fire:                bool,
-	on_fire_remaining_time: f32,
-}
-
-ballStartX :: 400
-ballStartY :: 300
-ballVX :: 200
-ballVY :: -270
-ballSpeedMultiplier: f32 = 1
-ballSpeedModifier: f32 = 0.25
-ballRadius :: 10
-ballRadius_PowerUp :: 5
-ballColor :: raylib.WHITE
-ballColor_Fireball :: raylib.ORANGE
-
 Brick :: struct {
 	bounds: raylib.Rectangle,
 	active: bool,
@@ -56,156 +25,67 @@ paddle_height :: 10
 paddle_velocity :: 300
 paddle: Paddle
 
-
-// power up related
-PowerUp :: struct {
-	bounds:         raylib.Rectangle,
-	preset:         PowerUpPreset,
-	active:         bool,
-	shouldRender:   bool,
-	remaining_time: f32,
-}
-
-PowerUpAbility :: enum {
-	SPLIT,
-	ENLARGE,
-	SLOW_BALL,
-	FIREBALL,
-	DOUBLE_POINTS,
-	EXTRA_LIFE,
-	FLOOR_SHIELD,
-	NARROW_PADDLE,
-	FAST_BALL,
-}
-
-PowerUpPreset :: struct {
-	ability:  PowerUpAbility,
-	color:    raylib.Color,
-	duration: f32,
-}
-
-presetList := [9]PowerUpPreset {
-	{ability = .SPLIT, color = raylib.BLUE, duration = 5},
-	{ability = .ENLARGE, color = raylib.GREEN, duration = 10},
-	{ability = .SLOW_BALL, color = raylib.MAGENTA, duration = 5},
-	{ability = .FAST_BALL, color = raylib.BROWN, duration = 6},
-	{ability = .FIREBALL, color = raylib.RED, duration = 5},
-	{ability = .DOUBLE_POINTS, color = raylib.PURPLE, duration = 10},
-	{ability = .FLOOR_SHIELD, color = raylib.BEIGE, duration = 0},
-	{ability = .NARROW_PADDLE, color = raylib.YELLOW, duration = 5},
-	{ability = .EXTRA_LIFE, color = raylib.WHITE, duration = 0},
-}
-powerUp_width :: 30
-powerUp_height :: 30
-powerUp_drop_speed :: 150
-powerUp_enlarge_width :: 30
-powerUp_narrow_width :: 40
-
 // game state related
 GameState :: enum {
 	MENU,
 	PLAYING,
 	GAME_OVER,
+	LEVEL_MENU,
+	GAME_WIN,
 }
 game_state: GameState = GameState.MENU
-lives := 3
-points := 0
-shield_amount := 0
 
-pointsMultiplier := 1
-
+catalog: LevelCatalog
 balls: [dynamic]Ball
 powerUps: [dynamic]PowerUp
 bricks: [50]Brick
 
-// sounds
-ball_bounce: raylib.Sound
-brick_destroyed: raylib.Sound
-power_up_pickup: raylib.Sound
-game_loop_music: raylib.Music
-ui_option_sound: raylib.Sound
-button_select: raylib.Sound
-
 main :: proc() {
 	raylib.InitWindow(800, 600, "Brick Breakout")
 	defer raylib.CloseWindow()
-	raylib.InitAudioDevice()
-	defer raylib.CloseAudioDevice()
-	ball_bounce = raylib.LoadSound("src/sfx/ball_bounce.mp3")
-	defer raylib.UnloadSound(ball_bounce)
-	brick_destroyed = raylib.LoadSound("src/sfx/brick-destroyed.mp3")
-	defer raylib.UnloadSound(brick_destroyed)
-	power_up_pickup = raylib.LoadSound("src/sfx/power-up-pickup.mp3")
-	defer raylib.UnloadSound(power_up_pickup)
-	game_loop_music = raylib.LoadMusicStream("src/sfx/game-loop-music.mp3")
-	game_loop_music.looping = true
-	raylib.SetMusicVolume(game_loop_music, 0.3)
-	raylib.PlayMusicStream(game_loop_music)
-	defer raylib.UnloadMusicStream(game_loop_music)
-	ui_option_sound = raylib.LoadSound("src/sfx/ui-hover-sfx.mp3")
-	defer raylib.UnloadSound(ui_option_sound)
-	button_select = raylib.LoadSound("src/sfx/button_select.mp3")
-	defer raylib.UnloadSound(button_select)
-	defer delete(balls)
-	defer delete(powerUps)
 	raylib.SetTargetFPS(60)
 
+	loaded_catalog, ok := read_level_catalog("levels/levels.json")
+	if !ok {
+		return
+	}
+	catalog = loaded_catalog
+	defer destroy_level_catalog(&catalog)
+
+	setup_sound()
+
+	defer delete(balls)
+	defer delete(powerUps)
+
 	for !raylib.WindowShouldClose() {
-		if (game_state == GameState.MENU) {
+		if (game_state == .MENU) {
 			menu(menu_options[:])
-		} else if (game_state == GameState.PLAYING) {
+		} else if game_state == .LEVEL_MENU {
+			level_menu(catalog)
+		} else if (game_state == .PLAYING) {
 			raylib.UpdateMusicStream(game_loop_music)
 			gameplay(&paddle)
-		} else if (game_state == GameState.GAME_OVER) {
+		} else if (game_state == .GAME_OVER) {
 			menu(game_over_menu[:])
+		} else if (game_state == .GAME_WIN && current_level_index == level_count - 1) {
+			menu(menu_options[:])
+		} else if (game_state == .GAME_WIN) {
+			menu(game_win_menu[:])
 		}
 	}
+	cleanup_sound()
 }
-
-menu :: proc(menu_array: []cstring) {
-	if (raylib.IsKeyReleased(.UP)) {
-		selected_option = (selected_option + len(menu_array) - 1) % len(menu_array)
-		raylib.PlaySound(ui_option_sound)
-	} else if (raylib.IsKeyReleased(.DOWN)) {
-		selected_option = (selected_option + 1) % len(menu_array)
-		raylib.PlaySound(ui_option_sound)
-	}
-
-	if (raylib.IsKeyPressed(.ENTER)) {
-		if (menu_array[selected_option] == "Play" || menu_array[selected_option] == "Restart") {
-			game_state = GameState.PLAYING
-			setup_level()
-			raylib.PlaySound(button_select)
-		} else if (menu_array[selected_option] == "Exit") {
-			raylib.CloseWindow()
-		}
-	}
-
-	block_height := i32(len(menu_options) - 1) * menu_spacing + menu_font
-	start_y := (raylib.GetScreenHeight() - block_height) / 2
-
-	raylib.BeginDrawing()
-	raylib.ClearBackground(raylib.BLACK)
-	for option, index in menu_array {
-		text_width := raylib.MeasureText(option, menu_font)
-		x := (raylib.GetScreenWidth() - text_width) / 2
-		y := start_y + i32(index) * menu_spacing
-		raylib.DrawText(
-			option,
-			x,
-			y,
-			menu_font,
-			index == selected_option ? raylib.RED : raylib.WHITE,
-		)
-	}
-	raylib.EndDrawing()
-}
-
 
 gameplay :: proc(paddle: ^Paddle) {
 	defer free_all(context.temp_allocator)
 	if (lives == 0) {
 		game_state = GameState.GAME_OVER
+		return
+	}
+
+	if (bricks_count == 0) {
+		game_state = .GAME_WIN
+		return
 	}
 
 	for &ball, index in balls {
@@ -240,464 +120,8 @@ gameplay :: proc(paddle: ^Paddle) {
 
 	}
 
-	points_text := fmt.ctprintf("Points: %d", points)
-	raylib.BeginDrawing()
-	raylib.ClearBackground(raylib.BLACK)
-	raylib.DrawText(fmt.ctprintf("Lives: %d", lives), 0, 0, menu_font, raylib.WHITE)
-	raylib.DrawText(
-		points_text,
-		raylib.GetScreenWidth() - raylib.MeasureText(points_text, menu_font),
-		0,
-		menu_font,
-		raylib.WHITE,
-	)
-	draw_balls()
-	draw_bricks(bricks[:])
-	draw_paddle(paddle^)
-	draw_power_ups()
-	raylib.EndDrawing()
+	draw_scene()
+
 	cleanup_balls()
 	cleanup_powerUps()
-}
-
-update_ball :: proc(ball: ^Ball, dt: f32) {
-
-	if (ball_count() == 1) {
-		ball.temporary = false
-		ball.radius = ballRadius
-	}
-	ball.position.x += (ball.velocity.x * ballSpeedMultiplier) * dt
-	ball.position.y += (ball.velocity.y * ballSpeedMultiplier) * dt
-	if (ball.on_fire_remaining_time > 0) {
-		ball.on_fire_remaining_time -= dt
-	}
-	ball.remaining_time -= dt
-	if (ball.remaining_time <= 0 && ball.temporary) {
-		ball.active = false
-	}
-	if (ball.on_fire_remaining_time <= 0) {
-		reset_fireball(ball)
-	}
-}
-
-draw_balls :: proc() {
-	for ball in balls {
-		if (!ball.active) {
-			continue
-		}
-		raylib.DrawCircleV(ball.position, ball.radius, ball.color)
-	}
-}
-
-draw_bricks :: proc(bricks: []Brick) {
-	for &brick in bricks {
-		if (brick.active) {
-			raylib.DrawRectangleRec(brick.bounds, brick.color)
-		}
-	}
-}
-
-draw_paddle :: proc(paddle: Paddle) {
-	raylib.DrawRectangleRec(paddle.bounds, raylib.WHITE)
-}
-
-draw_power_ups :: proc() {
-	for powerUp in powerUps {
-		if (powerUp.shouldRender) {
-			raylib.DrawRectangleRec(powerUp.bounds, powerUp.preset.color)
-		}
-	}
-}
-
-collides_with_wall :: proc(ball: ^Ball, index: int) {
-	width := f32(raylib.GetScreenWidth())
-	height := f32(raylib.GetScreenHeight())
-	r := ball.radius
-
-	if (ball.position.x + r >= width) {
-		ball.position.x = width - r
-		ball.velocity.x = -abs(ball.velocity.x)
-	}
-
-	if (ball.position.x - r <= 0) {
-		ball.position.x = r
-		ball.velocity.x = abs(ball.velocity.x)
-	}
-
-	if (ball.position.y + r >= height) {
-		ballCount := ball_count()
-		if (ballCount > 1) {
-			ball.active = false
-			ball.temporary = true
-			return
-		}
-
-		if (shield_amount > 0) {
-			shield_amount -= 1
-		} else {
-			lives -= 1
-		}
-		if (ball.on_fire) {
-			reset_fireball(ball)
-		}
-		ball.position.x = ballStartX
-		ball.position.y = ballStartY
-	}
-
-	if (ball.position.y - r <= 0) {
-		ball.position.y = r
-		ball.velocity.y = abs(ball.velocity.y)
-	}
-}
-
-check_brick_collision :: proc(ball: ^Ball, brick: ^Brick) {
-	if (!brick.active) {
-		return
-	}
-
-	if (!raylib.CheckCollisionCircleRec(ball.position, ball.radius, brick.bounds)) {
-		return
-	}
-
-	brick.active = false
-	raylib.PlaySound(brick_destroyed)
-	points += 100 * pointsMultiplier
-	normal := ball_collision_normal(ball^, brick.bounds)
-
-	roll := rand.int_range(1, 11)
-	roll_preset := rand.int_range(0, len(presetList))
-	if (roll > 7) {
-		powerUp := PowerUp {
-			raylib.Rectangle{brick.bounds.x, brick.bounds.y, powerUp_width, powerUp_height},
-			presetList[roll_preset],
-			false,
-			true,
-			presetList[roll_preset].duration,
-		}
-
-		append(&powerUps, powerUp)
-	}
-
-	if (ball.on_fire) {
-		return
-	}
-
-	if (normal.y > 0) {
-		ball.velocity.y = abs(ball.velocity.y)
-	} else if (normal.y < 0) {
-		ball.velocity.y = -abs(ball.velocity.y)
-	}
-
-	if (normal.x > 0) {
-		ball.velocity.x = abs(ball.velocity.x)
-	} else if (normal.x < 0) {
-		ball.velocity.x = -abs(ball.velocity.x)
-	}
-	raylib.PlaySound(ball_bounce)
-}
-
-check_paddle_collision :: proc(ball: ^Ball, paddle: ^Paddle) {
-	if (!raylib.CheckCollisionCircleRec(ball.position, ball.radius, paddle.bounds)) {
-		return
-	}
-
-	normal := ball_collision_normal(ball^, paddle.bounds)
-
-	if (normal.y > 0) {
-		ball.position.y = paddle.bounds.y + paddle.bounds.height + ball.radius
-		ball.velocity.y = abs(ball.velocity.y)
-	} else if (normal.y < 0) {
-		ball.position.y = paddle.bounds.y - ball.radius
-		ball.velocity.y = -abs(ball.velocity.y)
-	}
-
-	if (normal.x > 0) {
-		ball.position.x = paddle.bounds.x + paddle.bounds.width + ball.radius
-		ball.velocity.x = abs(ball.velocity.x)
-	} else if (normal.x < 0) {
-		ball.position.x = paddle.bounds.x - ball.radius
-		ball.velocity.x = -abs(ball.velocity.x)
-	}
-	raylib.PlaySound(ball_bounce)
-}
-
-ball_collision_normal :: proc(ball: Ball, rect: raylib.Rectangle) -> raylib.Vector2 {
-	closest := raylib.Vector2 {
-		clamp(ball.position.x, rect.x, rect.x + rect.width),
-		clamp(ball.position.y, rect.y, rect.y + rect.height),
-	}
-
-	normal := ball.position - closest
-
-	if (normal.x == 0 && normal.y == 0) {
-		distances := [4]f32 {
-			ball.position.x - rect.x, // Left
-			rect.x + rect.width - ball.position.x, //Right
-			ball.position.y - rect.y, // Top
-			rect.y + rect.height - ball.position.y, // Bottom
-		}
-
-		normals := [4]raylib.Vector2{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}
-
-		nearest := 0
-		for i := 1; i < len(distances); i += 1 {
-			if distances[i] < distances[nearest] {
-				nearest = i
-			}
-		}
-
-		normal = normals[nearest]
-	}
-
-	return normal
-}
-
-powerUp_collides_with_wall :: proc() {
-	width := f32(raylib.GetScreenWidth())
-	height := f32(raylib.GetScreenHeight())
-	for &powerUp in powerUps {
-		if (powerUp.bounds.y >= height) {
-			powerUp.shouldRender = false
-			powerUp.active = false
-			powerUp.remaining_time = 0
-		}
-	}
-}
-
-init_bricks :: proc() {
-	index := 0
-	x: f32 = startX
-	y: f32 = startY
-	for i := 0; i < 3; i += 1 {
-		for j := 0; j < 10; j += 1 {
-			bricks[index] = Brick {
-				raylib.Rectangle{x, y, brick_width, brick_height},
-				true,
-				raylib.RED,
-			}
-
-			x = x + brick_width + 6
-			index += 1
-		}
-		x = startX
-		y = y + brick_height + 6
-	}
-}
-
-powerUp_update :: proc() {
-
-	for &powerUp in powerUps {
-		if (!powerUp.shouldRender) {
-			continue
-		}
-
-		powerUp.bounds.y += powerUp_drop_speed * raylib.GetFrameTime()
-	}
-}
-
-powerUp_tick_cooldown :: proc() {
-	for &powerUp in powerUps {
-		if (!powerUp.active) {
-			continue
-		}
-
-		powerUp.remaining_time -= raylib.GetFrameTime()
-		if (powerUp.remaining_time > 0) {
-			continue
-		}
-
-		ability := powerUp.preset.ability
-
-		if (ability == .SPLIT) {
-			if (ball_count() == 1) {
-				balls[get_ball()].radius = ballRadius
-			}
-		} else if (powerUp.preset.ability == .ENLARGE) {
-			paddle.bounds.width -= powerUp_enlarge_width
-		} else if (ability == .SLOW_BALL) {
-			ballSpeedMultiplier += ballSpeedModifier
-		} else if (ability == .FAST_BALL) {
-			ballSpeedMultiplier -= ballSpeedModifier
-		} else if (ability == .DOUBLE_POINTS) {
-			pointsMultiplier /= 2
-		} else if (ability == .NARROW_PADDLE) {
-			paddle.bounds.width += powerUp_narrow_width
-		}
-		powerUp.active = false
-	}
-}
-
-
-check_power_up_paddle_colision :: proc(paddle: ^Paddle) {
-	for &powerUp in powerUps {
-		if (!raylib.CheckCollisionRecs(powerUp.bounds, paddle.bounds)) {
-			continue
-		}
-
-		raylib.PlaySound(power_up_pickup)
-		powerUp.shouldRender = false
-		powerUp.active = true
-		powerUp.remaining_time = powerUp.preset.duration
-		powerUp.bounds.x = 0
-		powerUp.bounds.y = 0
-
-		ability := powerUp.preset.ability
-
-		if (ability == .SPLIT) {
-			apply_ability_SPLIT(powerUp.remaining_time)
-		} else if (ability == .ENLARGE) {
-			paddle.bounds.width += powerUp_enlarge_width
-		} else if (ability == .SLOW_BALL) {
-			if ballSpeedMultiplier <= 0.25 {
-				ballSpeedModifier = 0.25
-			} else {
-				ballSpeedMultiplier -= ballSpeedModifier
-			}
-		} else if (ability == .FAST_BALL) {
-			if (ballSpeedMultiplier >= 2) {
-				ballSpeedMultiplier = 2
-			} else {
-				ballSpeedMultiplier += ballSpeedModifier
-			}
-		} else if (ability == .EXTRA_LIFE) {
-			lives += 1
-		} else if (ability == .DOUBLE_POINTS) {
-			pointsMultiplier *= 2
-		} else if (ability == .FLOOR_SHIELD) {
-			shield_amount += 1
-		} else if (ability == .NARROW_PADDLE) {
-			paddle.bounds.width -= powerUp_narrow_width
-		} else if (ability == .FIREBALL) {
-			for &ball in balls {
-				ball.on_fire = true
-				ball.color = ballColor_Fireball
-				ball.on_fire_remaining_time += powerUp.preset.duration
-			}
-		}
-	}
-}
-
-ball_count :: proc() -> int {
-	counter := 0
-	for ball in balls {
-		counter += ball.active ? 1 : 0
-	}
-
-	return counter
-}
-
-get_ball :: proc() -> int {
-	for ball, index in balls {
-		if (ball.active && !ball.temporary) {
-			return index
-		}
-	}
-
-	return 0
-}
-
-cleanup_balls :: proc() {
-	shouldAdvance: bool = true
-	for i := 0; i < len(balls); i += shouldAdvance ? 1 : 0 {
-		shouldAdvance = true
-		if (balls[i].active) {
-			continue
-		}
-
-		ordered_remove(&balls, i)
-		shouldAdvance = false
-	}
-}
-
-cleanup_powerUps :: proc() {
-	shouldAdvance: bool = true
-	for i := 0; i < len(powerUps); i += shouldAdvance ? 1 : 0 {
-		shouldAdvance = true
-		if (powerUps[i].active || powerUps[i].remaining_time > 0 || powerUps[i].shouldRender) {
-			continue
-		}
-
-		ordered_remove(&powerUps, i)
-		shouldAdvance = false
-	}
-}
-
-apply_ability_SPLIT :: proc(remaining_time: f32) {
-	newBalls: [dynamic]Ball
-	defer delete(newBalls)
-	for &ball, index in balls {
-		if (!ball.active) {
-			continue
-		}
-		ball.radius = ballRadius_PowerUp
-		for i := 0; i < 2; i += 1 {
-			// angle calculation
-			angle: f32 = 20 * math.PI / 180 // 20 degrees in radians
-			if i == 1 {
-				angle = -angle
-			}
-
-			vx := ball.velocity.x
-			vy := ball.velocity.y
-
-			newBall := Ball {
-				position               = {ball.position.x, ball.position.y},
-				velocity               = {
-					vx * math.cos(angle) - vy * math.sin(angle),
-					vx * math.sin(angle) + vy * math.cos(angle),
-				},
-				radius                 = ballRadius_PowerUp,
-				active                 = true,
-				remaining_time         = remaining_time,
-				temporary              = true,
-				color                  = ball.color,
-				on_fire                = ball.on_fire,
-				on_fire_remaining_time = ball.on_fire_remaining_time,
-			}
-
-			append(&newBalls, newBall)
-		}
-	}
-
-	for ball in newBalls {
-		append(&balls, ball)
-	}
-}
-
-reset_fireball :: proc(ball: ^Ball) {
-	ball.on_fire = false
-	ball.on_fire_remaining_time = 0
-	ball.color = ballColor
-}
-setup_level :: proc() {
-	lives = 3
-	points = 0
-	shield_amount = 0
-	ballSpeedMultiplier = 1
-	pointsMultiplier = 1
-
-	init_bricks()
-	clear(&powerUps)
-	clear(&balls)
-	start_ball := Ball {
-		position               = {ballStartX, ballStartY},
-		velocity               = {ballVX, ballVY},
-		radius                 = ballRadius,
-		active                 = true,
-		remaining_time         = 0,
-		temporary              = false,
-		color                  = ballColor,
-		on_fire                = false,
-		on_fire_remaining_time = 0,
-	}
-	paddle = Paddle {
-		raylib.Rectangle {
-			(f32(raylib.GetScreenWidth()) - paddle_width) / 2,
-			f32(raylib.GetScreenHeight()) - paddle_height - 10,
-			paddle_width,
-			paddle_height,
-		},
-		paddle_velocity,
-	}
-	append(&balls, start_ball)
 }

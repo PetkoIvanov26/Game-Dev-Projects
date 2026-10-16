@@ -1,6 +1,6 @@
 {
   "name": "One Chance",
-  "layout": "layout_02.txt",
+  "layout": "levels/layouts/layout_02.txt",
   "starting_lives": 1,
-  "base_speed_multiplier": 1.5
+  "base_speed_multiplier": 1.15
 }
