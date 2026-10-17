@@ -31,6 +31,7 @@ GameState :: enum {
 	GAME_OVER,
 	LEVEL_MENU,
 	GAME_WIN,
+	PAUSE_MENU,
 }
 game_state: GameState = GameState.MENU
 
@@ -70,6 +71,8 @@ main :: proc() {
 			menu(menu_options[:])
 		} else if (game_state == .GAME_WIN) {
 			menu(game_win_menu[:])
+		} else if (game_state == .PAUSE_MENU) {
+			menu(game_pause_menu[:])
 		}
 	}
 	cleanup_sound()
@@ -117,6 +120,11 @@ gameplay :: proc(paddle: ^Paddle) {
 			paddle.bounds.x = f32(raylib.GetScreenWidth()) - paddle.bounds.width
 		}
 
+	}
+
+	if (raylib.IsKeyPressed(.P)) {
+		game_state = .PAUSE_MENU
+		return
 	}
 
 	draw_scene()

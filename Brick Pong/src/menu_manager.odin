@@ -5,7 +5,8 @@ import raylib "vendor:raylib"
 
 menu_options := [4]cstring{"Play", "Levels", "Settings", "Exit"}
 game_over_menu := [3]cstring{"Restart", "Levels", "Back To Menu"}
-game_win_menu := [3]cstring{"Continue", "Levels", "Back To Menu"}
+game_win_menu := [3]cstring{"Next Level", "Levels", "Back To Menu"}
+game_pause_menu := [2]cstring{"Continue", "Back To Menu"}
 selected_option := 0
 menu_font: i32 = 30
 menu_spacing: i32 = 45
@@ -39,6 +40,9 @@ menu :: proc(menu_array: []cstring) {
 			selected_option = 0
 			game_state = .MENU
 		} else if (menu_array[selected_option] == "Continue") {
+			game_state = .PLAYING
+			raylib.PlaySound(button_select)
+		} else if (menu_array[selected_option] == "Next Level") {
 			current_level_index = (current_level_index + 1) % level_count
 			game_state = .PLAYING
 			raylib.PlaySound(button_select)
